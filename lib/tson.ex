@@ -246,14 +246,15 @@ defmodule TSON do
       |> Enum.sort()
 
     mapper = fn k ->
-      bits_v = _encode(Map.get(value, k), stringTable, keyTable)
+      subEncoding = _encode(Map.get(value, k), stringTable, keyTable)
       index = keyTable |> RepetitionEncoder.lookup(k)
 
       if is_integer(index) do
+        bits_v = subEncoding |> IO.iodata_to_binary()
         <<_::size(1), rest::bitstring>> = bits_v
         [<<1::size(1), rest::bitstring>>, vli(index)]
       else
-        [bits_v, k, 0]
+        [subEncoding, k, 0]
       end
     end
 
