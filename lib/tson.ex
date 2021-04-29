@@ -78,21 +78,17 @@ defmodule TSON do
       Agent.start_link(fn -> %{} end)
     end
 
-    def encode(pid, value) do
-      Agent.get_and_update(pid, fn map -> _encode(map, value) end)
+    def encoded(pid, value) do
+      Agent.get_and_update(pid, fn map -> _encoded(map, value) end)
     end
 
-    defp _encode(map, value) when is_atom(value) do
-      _encode(map, Atom.to_string(value))
-    end
-
-    defp _encode(map, value) when is_binary(value) do
+    defp _encoded(map, value) when is_binary(value) do
       case Map.fetch(map, value) do
         {:ok, index} ->
           {index, map}
 
         :error ->
-          {value, map |> Map.put(value, map_size(map))}
+          {nil, map |> Map.put(value, map_size(map))}
       end
     end
   end
@@ -118,84 +114,81 @@ defmodule TSON do
 
   def encode(value) do
     {:ok, stringTable} = RepeatedStringEncoder.start_link()
-    _encode(value, stringTable)
+    {:ok, keyTable} = RepeatedStringEncoder.start_link()
+    _encode(value, stringTable, keyTable)
   end
 
-  defp _encode(value, stringTable) when is_integer(value) do
+  defp _encode(value, _, _) when is_integer(value) do
     cond do
-      value in 0..63 -> <<@opSmallInt0 + value>>, stringLUT}
-      value < 0 -> <<@opNegativeVLI>> <> vli(-value), stringLUT}
-      true -> <<@opPositiveVLI>> <> vli(value), stringLUT}
+      value in 0..63 -> <<@opSmallInt0 + value>>
+      value < 0 -> <<@opNegativeVLI>> <> vli(-value)
+      true -> <<@opPositiveVLI>> <> vli(value)
     end
   end
 
-  defp _encode(true, stringLUT) do
-    {<<@opTrue>>, stringLUT}
+  defp _encode(true, _, _) do
+    <<@opTrue>>
   end
 
-  defp _encode(false, stringLUT) do
-    {<<@opFalse>>, stringLUT}
+  defp _encode(false, _, _) do
+    <<@opFalse>>
   end
 
-  defp _encode(nil, stringLUT) do
-    {<<@opEmpty>>, stringLUT}
+  defp _encode(nil, _, _) do
+    <<@opEmpty>>
   end
 
-  defp _encode(value, stringLUT) when is_binary(value) do
-    {<<@opBytes>> <> vli(byte_size(value)) <> value, stringLUT}
+  defp _encode(value, _, _) when is_binary(value) do
+    <<@opBytes>> <> vli(byte_size(value)) <> value
   end
 
-  defp _encode(value, stringLUT) when is_list(value) do
-    reducer = fn x, {bits1, lut1} ->
-      {bits2, lut2} = _encode(x, lut1)
-      {bits1 <> bits2, lut2}
-    end
-
-    {bitsAll, lut3} = value |> Enum.reduce({<<>>, stringLUT}, reducer)
+  defp _encode(value, stringTable, keyTable) when is_list(value) do
+    bitsAll = value |> Enum.map_join(fn v -> _encode(v, stringTable, keyTable) end)
     listLength = length(value)
 
     cond do
-      listLength in 1..4 -> {<<@opSmallArray1 - 1 + listLength>> <> bitsAll, lut3}
-      true -> {<<@opArray>> <> bitsAll <> <<0>>, lut3}
+      listLength in 1..4 -> <<@opSmallArray1 - 1 + listLength>> <> bitsAll
+      true -> <<@opArray>> <> bitsAll <> <<0>>
     end
   end
 
-  defp _encode(%String{utf8: utf8}, stringLUT) do
-    case Map.fetch(stringLUT, utf8) do
-      {:ok, index} ->
-        {<<@opRepeatedString>> <> vli(index), stringLUT}
+  defp _encode(%String{utf8: utf8}, stringTable, _) do
+    index = stringTable |> RepeatedStringEncoder.encoded(utf8)
 
-      :error ->
-        lut2 = stringLUT |> Map.map(utf8, map_size(stringLUT))
+    cond do
+      is_integer(index) ->
+        <<@opRepeatedString>> <> vli(index)
+
+      true ->
         byteCount = byte_size(utf8)
 
         cond do
-          byteCount == 0 -> {<<@opTerminatedString, 0>>, lut2}
-          byteCount in 1..24 -> {<<@opSmallString1 - 1 + byteCount>> <> utf8, lut2}
-          true -> {<<@opTerminatedString>> <> utf8 <> <<0>>, lut2}
+          byteCount == 0 -> <<@opTerminatedString, 0>>
+          byteCount in 1..24 -> <<@opSmallString1 - 1 + byteCount>> <> utf8
+          true -> <<@opTerminatedString>> <> utf8 <> <<0>>
         end
     end
   end
 
-  defp _encode(%LatLon{latitude: latitude, longitude: longitude}, stringLUT) do
+  defp _encode(%LatLon{latitude: latitude, longitude: longitude}, _, _) do
     precision = 25
     lat_hash = geo_hash2(latitude, -90.0, 90.0, precision)
     lon_hash = geo_hash2(longitude, -180.0, 180.0, precision)
     spliced = lon_hash <<< 1 ||| lat_hash
-    {<<@opLatLon>> <> vli(spliced), stringLUT}
+    <<@opLatLon>> <> vli(spliced)
   end
 
-  defp _encode(%DateTime{} = datetime, stringLUT) do
+  defp _encode(%DateTime{} = datetime, _, _) do
     milliseconds = DateTime.diff(datetime, @epoch, :millisecond)
 
     if milliseconds >= 0 do
-      {<<@opPositiveTimestamp>> <> vli(milliseconds), stringLUT}
+      <<@opPositiveTimestamp>> <> vli(milliseconds)
     else
-      {<<@opNegativeTimestamp>> <> vli(-milliseconds), stringLUT}
+      <<@opNegativeTimestamp>> <> vli(-milliseconds)
     end
   end
 
-  defp _encode(%Duration{} = duration, stringLUT) do
+  defp _encode(%Duration{} = duration, _, _) do
     canonized = Duration.reduced(duration)
     magnitude = abs(canonized.amount)
 
@@ -207,55 +200,51 @@ defmodule TSON do
       end
 
     case canonized.unit do
-      :hour -> {<<@opDuration, negateMask ||| 0x04>> <> vli(magnitude), stringLUT}
-      :minute -> {<<@opDuration, negateMask ||| 0x02>> <> vli(magnitude), stringLUT}
-      :second -> {<<@opDuration, negateMask ||| 0x01>> <> vli(magnitude), stringLUT}
-      :millisecond -> {<<@opDuration, negateMask ||| 0x03>> <> vli(magnitude), stringLUT}
-      :microsecond -> {<<@opDuration, negateMask ||| 0x06>> <> vli(magnitude), stringLUT}
-      :nanosecond -> {<<@opDuration, negateMask ||| 0x09>> <> vli(magnitude), stringLUT}
+      :hour -> <<@opDuration, negateMask ||| 0x04>> <> vli(magnitude)
+      :minute -> <<@opDuration, negateMask ||| 0x02>> <> vli(magnitude)
+      :second -> <<@opDuration, negateMask ||| 0x01>> <> vli(magnitude)
+      :millisecond -> <<@opDuration, negateMask ||| 0x03>> <> vli(magnitude)
+      :microsecond -> <<@opDuration, negateMask ||| 0x06>> <> vli(magnitude)
+      :nanosecond -> <<@opDuration, negateMask ||| 0x09>> <> vli(magnitude)
     end
   end
 
-  defp _encode(value, stringLUT) when is_float(value) do
+  defp _encode(value, stringTable, keyTable) when is_float(value) do
     nearestInt = round(value)
 
     if nearestInt == value do
-      _encode(nearestInt, stringLUT)
+      _encode(nearestInt, stringTable, keyTable)
     else
       bytes4 = <<value::float-32-little>>
       <<value32::float-32-little>> = bytes4
 
       if value32 == value do
-        {<<@opFloat4>> <> bytes4, stringLUT}
+        <<@opFloat4>> <> bytes4
       else
         bytes8 = <<value::float-64-little>>
-        {<<@opFloat8>> <> bytes8, stringLUT}
+        <<@opFloat8>> <> bytes8
       end
     end
   end
 
-  defp _encode(value, stringLUT) when is_map(value) do
-    reducer = fn {k, v}, {bits1, lut1} ->
-      bits_k =
-        if is_atom(k) do
-          Atom.to_string(k) <> <<0>>
-        else
-          k <> <<0>>
-        end
-
-      {bits_v, lut2} = _encode(v, lut1)
-      {bits1 <> bits_v <> bits_k, lut2}
+  defp _encode(value, stringTable, keyTable) when is_map(value) do
+    sortedKeys = value |> Map.keys() |> Enum.map(fn k -> if is_atom(k) do Atom.to_string(k) else k end end) |> Enum.sort()
+    mapper = fn k ->
+      bits_v = _encode(Map.get(value, k), stringTable, keyTable)
+      index = keyTable |> RepeatedStringEncoder.encoded(k)
+      if is_integer(index) do
+        <<_::size(1), rest::bitstring>> = bits_v
+        <<1::size(1), rest::bitstring>> <> vli(index)
+      else
+        bits_v <> k <> <<0>>
+      end
     end
 
-    sortedKeys = value |> Map.keys() |> Enum.sort()
-    associations = for key <- sortedKeys, do: {key, Map.get(value, key)}
-
-    {bitsAll, lut3} = associations |> Enum.reduce({<<>>, stringLUT}, reducer)
+    bitsAll = sortedKeys |> Enum.map_join(mapper)
     mapSize = map_size(value)
-
     cond do
-      mapSize in 1..4 -> {<<@opSmallDocument1 - 1 + mapSize>> <> bitsAll, lut3}
-      true -> {<<@opDocument>> <> bitsAll <> <<0>>, lut3}
+      mapSize in 1..4 -> <<@opSmallDocument1 - 1 + mapSize>> <> bitsAll
+      true -> <<@opDocument>> <> bitsAll <> <<0>>
     end
   end
 
