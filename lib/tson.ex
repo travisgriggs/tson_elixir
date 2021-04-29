@@ -2,7 +2,16 @@ defmodule TSON do
   use Bitwise, only_operators: true
 
   @moduledoc """
-  Documentation for `TSON`.
+  TSON is a an "object/data" [de]serialization protocol that was inspired by an application specific need to have an interchange encoder/decoder
+  that was JSON like. It was further inspired by BSON (which was smaller but includes lots of offsets convenient for address jumping AND has a richer
+  typeset).
+
+  The basic structue is an opcode[moredata] recursive chaining of data.
+
+  It was tuned to fit our own application's nuances and further inspired by far too much familiarity with Smalltalk Virtual Machine bytecode design as well
+  a general appreciate for Benford's Law (smaller values show up more often than not in many real world cases).
+
+  The "T" stands for Tiny, Tight, Terse, or TWiG, but not Travis.
   """
 
   @opDocument 1
@@ -37,14 +46,17 @@ defmodule TSON do
 
   @epoch DateTime.from_iso8601("2016-01-01T00:00:00Z") |> elem(1)
 
+  # we need a struct wrapper around strings, because we have to preserve/disambiguate the difference between a raw binary and a utf8 string
   defmodule String do
     defstruct utf8: ""
   end
 
+  # basic structure for modeling a GIS coordinate
   defmodule LatLon do
     defstruct latitude: 0.0, longitude: 0.0
   end
 
+  # simple structure for modelling a duration in various units, with the ability to reduce to least needed unit
   defmodule Duration do
     defstruct amount: 0, unit: :second
 
@@ -71,6 +83,7 @@ defmodule TSON do
     end
   end
 
+  # a caching Look Up Table that is used record occurences of keys/strings as they are encountered and vend those occurence indices on future lookups
   defmodule RepetitionEncoder do
     use Agent
 
@@ -93,25 +106,8 @@ defmodule TSON do
     end
   end
 
-  def decode(<<@opTrue>>) do
-    true
-  end
-
-  def decode(<<@opFalse>>) do
-    false
-  end
-
-  def decode(<<@opEmpty>>) do
-    nil
-  end
-
-  def vli(value) when value >= 0 do
-    cond do
-      value in 0..0x7F -> <<value>>
-      true -> <<(value &&& 0x7F) ||| 0x80>> <> vli(value >>> 7)
-    end
-  end
-
+  # main api, use type specific encoders to recursively traverse value with repeatition tables
+  # flatten (iodata) results into single binary when done
   def encode(value) do
     {:ok, stringTable} = RepetitionEncoder.start_link()
     {:ok, keyTable} = RepetitionEncoder.start_link()
@@ -124,8 +120,8 @@ defmodule TSON do
   defp _encode(value, _, _) when is_integer(value) do
     cond do
       value in 0..63 -> <<@opSmallInt0 + value>>
-      value < 0 -> [@opNegativeVLI, vli(-value)]
-      true -> [@opPositiveVLI, vli(value)]
+      value < 0 -> [@opNegativeVLI, varuint(-value)]
+      true -> [@opPositiveVLI, varuint(value)]
     end
   end
 
@@ -142,7 +138,7 @@ defmodule TSON do
   end
 
   defp _encode(value, _, _) when is_binary(value) do
-    [@opBytes, vli(byte_size(value)), value]
+    [@opBytes, varuint(byte_size(value)), value]
   end
 
   defp _encode(value, stringTable, keyTable) when is_list(value) do
@@ -160,7 +156,7 @@ defmodule TSON do
 
     cond do
       is_integer(index) ->
-        [@opRepeatedString, vli(index)]
+        [@opRepeatedString, varuint(index)]
 
       true ->
         byteCount = byte_size(utf8)
@@ -177,16 +173,16 @@ defmodule TSON do
     lat_hash = geo_hash2(latitude, -90.0, 90.0, precision)
     lon_hash = geo_hash2(longitude, -180.0, 180.0, precision)
     spliced = lon_hash <<< 1 ||| lat_hash
-    [@opLatLon, vli(spliced)]
+    [@opLatLon, varuint(spliced)]
   end
 
   defp _encode(%DateTime{} = datetime, _, _) do
     milliseconds = DateTime.diff(datetime, @epoch, :millisecond)
 
     if milliseconds >= 0 do
-      [@opPositiveTimestamp, vli(milliseconds)]
+      [@opPositiveTimestamp, varuint(milliseconds)]
     else
-      [@opNegativeTimestamp, vli(-milliseconds)]
+      [@opNegativeTimestamp, varuint(-milliseconds)]
     end
   end
 
@@ -212,7 +208,7 @@ defmodule TSON do
           :nanosecond -> 0x09
         end
 
-    [@opDuration, opUnit, vli(magnitude)]
+    [@opDuration, opUnit, varuint(magnitude)]
   end
 
   defp _encode(value, stringTable, keyTable) when is_float(value) do
@@ -252,7 +248,7 @@ defmodule TSON do
       if is_integer(index) do
         bits_v = subEncoding |> IO.iodata_to_binary()
         <<_::size(1), rest::bitstring>> = bits_v
-        [<<1::size(1), rest::bitstring>>, vli(index)]
+        [<<1::size(1), rest::bitstring>>, varuint(index)]
       else
         [subEncoding, k, 0]
       end
@@ -267,6 +263,8 @@ defmodule TSON do
     end
   end
 
+  # given a range and coordinate, successively divide the range in half and record in bitmap which half contains the value, repeate precision times
+  # our bitmap is actually 2 bits per decision, so that we can shift one and or them as an interleaved value for the lat and lon
   defp geo_hash2(_, _, _, 0) do
     0
   end
@@ -280,5 +278,25 @@ defmodule TSON do
     else
       0 <<< shift ||| geo_hash2(value, low, mid, precision - 1)
     end
+  end
+
+  defp varuint(value) when value >= 0 do
+    cond do
+      value in 0..0x7F -> <<value>>
+      true -> <<(value &&& 0x7F) ||| 0x80>> <> varuint(value >>> 7)
+    end
+  end
+
+  # the beginning of a the decoding ability, set aside until encoding is iterated on a bit
+  def decode(<<@opTrue>>) do
+    true
+  end
+
+  def decode(<<@opFalse>>) do
+    false
+  end
+
+  def decode(<<@opEmpty>>) do
+    nil
   end
 end
