@@ -5,7 +5,7 @@ defmodule TSON do
   Documentation for `TSON`.
   """
 
-  # @opDocument 1
+  @opDocument 1
   @opArray 2
   @opBytes 3
   @opPositiveTimestamp 4
@@ -16,10 +16,10 @@ defmodule TSON do
   @opLatLon 9
   # 10 - 13 unused
   @opTerminatedString 14
-  # @opRepeatedString 15
+  @opRepeatedString 15
   @opSmallString1 16
   # @opSmallString24 39
-  # @opSmallDocument1 40
+  @opSmallDocument1 40
   # @opSmallDocument4 43
   @opSmallArray1 44
   # @opSmallArray4 47
@@ -28,8 +28,8 @@ defmodule TSON do
   # 56 - 57 unused
   @opPositiveVLI 58
   @opNegativeVLI 59
-  # @opFloat4 60
-  # @opFloat8 61
+  @opFloat4 60
+  @opFloat8 61
   # @opPositiveFraction 62
   # @opPositiveFraction 63
   @opSmallInt0 64
@@ -71,6 +71,32 @@ defmodule TSON do
     end
   end
 
+  defmodule RepeatedStringEncoder do
+    use Agent
+
+    def start_link do
+      Agent.start_link(fn -> %{} end)
+    end
+
+    def encode(pid, value) do
+      Agent.get_and_update(pid, fn map -> _encode(map, value) end)
+    end
+
+    defp _encode(map, value) when is_atom(value) do
+      _encode(map, Atom.to_string(value))
+    end
+
+    defp _encode(map, value) when is_binary(value) do
+      case Map.fetch(map, value) do
+        {:ok, index} ->
+          {index, map}
+
+        :error ->
+          {value, map |> Map.put(value, map_size(map))}
+      end
+    end
+  end
+
   def decode(<<@opTrue>>) do
     true
   end
@@ -83,76 +109,93 @@ defmodule TSON do
     nil
   end
 
-  def vli(int) when int >= 0 do
+  def vli(value) when value >= 0 do
     cond do
-      int in 0..0x7F -> <<int>>
-      true -> <<(int &&& 0x7F) ||| 0x80>> <> vli(int >>> 7)
+      value in 0..0x7F -> <<value>>
+      true -> <<(value &&& 0x7F) ||| 0x80>> <> vli(value >>> 7)
     end
   end
 
-  def encode(value) when is_integer(value) do
+  def encode(value) do
+    {:ok, stringTable} = RepeatedStringEncoder.start_link()
+    _encode(value, stringTable)
+  end
+
+  defp _encode(value, stringTable) when is_integer(value) do
     cond do
-      value in 0..63 -> <<@opSmallInt0 + value>>
-      value < 0 -> <<@opNegativeVLI>> <> vli(-value)
-      true -> <<@opPositiveVLI>> <> vli(value)
+      value in 0..63 -> <<@opSmallInt0 + value>>, stringLUT}
+      value < 0 -> <<@opNegativeVLI>> <> vli(-value), stringLUT}
+      true -> <<@opPositiveVLI>> <> vli(value), stringLUT}
     end
   end
 
-  def encode(true, _) do
-    <<@opTrue>>
+  defp _encode(true, stringLUT) do
+    {<<@opTrue>>, stringLUT}
   end
 
-  def encode(false) do
-    <<@opFalse>>
+  defp _encode(false, stringLUT) do
+    {<<@opFalse>>, stringLUT}
   end
 
-  def encode(nil, _) do
-    <<@opEmpty>>
+  defp _encode(nil, stringLUT) do
+    {<<@opEmpty>>, stringLUT}
   end
 
-  def encode(binary) when is_binary(binary) do
-    <<@opBytes>> <> vli(byte_size(binary)) <> binary
+  defp _encode(value, stringLUT) when is_binary(value) do
+    {<<@opBytes>> <> vli(byte_size(value)) <> value, stringLUT}
   end
 
-  def encode(list) when is_list(list) do
-    allEncoded = Enum.map_join(list, &encode/1)
-    listLength = length(list)
+  defp _encode(value, stringLUT) when is_list(value) do
+    reducer = fn x, {bits1, lut1} ->
+      {bits2, lut2} = _encode(x, lut1)
+      {bits1 <> bits2, lut2}
+    end
+
+    {bitsAll, lut3} = value |> Enum.reduce({<<>>, stringLUT}, reducer)
+    listLength = length(value)
 
     cond do
-      listLength in 1..4 -> <<@opSmallArray1 - 1 + listLength>> <> allEncoded
-      true -> <<@opArray>> <> allEncoded <> <<0>>
+      listLength in 1..4 -> {<<@opSmallArray1 - 1 + listLength>> <> bitsAll, lut3}
+      true -> {<<@opArray>> <> bitsAll <> <<0>>, lut3}
     end
   end
 
-  def encode(%String{utf8: utf8}) do
-    with byteCount = byte_size(utf8) do
-      cond do
-        byteCount == 0 -> <<@opTerminatedString, 0>>
-        byteCount in 1..24 -> <<@opSmallString1 - 1 + byteCount>> <> utf8
-        true -> <<@opTerminatedString>> <> utf8 <> <<0>>
-      end
+  defp _encode(%String{utf8: utf8}, stringLUT) do
+    case Map.fetch(stringLUT, utf8) do
+      {:ok, index} ->
+        {<<@opRepeatedString>> <> vli(index), stringLUT}
+
+      :error ->
+        lut2 = stringLUT |> Map.map(utf8, map_size(stringLUT))
+        byteCount = byte_size(utf8)
+
+        cond do
+          byteCount == 0 -> {<<@opTerminatedString, 0>>, lut2}
+          byteCount in 1..24 -> {<<@opSmallString1 - 1 + byteCount>> <> utf8, lut2}
+          true -> {<<@opTerminatedString>> <> utf8 <> <<0>>, lut2}
+        end
     end
   end
 
-  def encode(%LatLon{latitude: latitude, longitude: longitude}) do
+  defp _encode(%LatLon{latitude: latitude, longitude: longitude}, stringLUT) do
     precision = 25
     lat_hash = geo_hash2(latitude, -90.0, 90.0, precision)
     lon_hash = geo_hash2(longitude, -180.0, 180.0, precision)
     spliced = lon_hash <<< 1 ||| lat_hash
-    <<@opLatLon>> <> vli(spliced)
+    {<<@opLatLon>> <> vli(spliced), stringLUT}
   end
 
-  def encode(%DateTime{} = datetime) do
+  defp _encode(%DateTime{} = datetime, stringLUT) do
     milliseconds = DateTime.diff(datetime, @epoch, :millisecond)
 
     if milliseconds >= 0 do
-      <<@opPositiveTimestamp>> <> vli(milliseconds)
+      {<<@opPositiveTimestamp>> <> vli(milliseconds), stringLUT}
     else
-      <<@opNegativeTimestamp>> <> vli(-milliseconds)
+      {<<@opNegativeTimestamp>> <> vli(-milliseconds), stringLUT}
     end
   end
 
-  def encode(%Duration{} = duration) do
+  defp _encode(%Duration{} = duration, stringLUT) do
     canonized = Duration.reduced(duration)
     magnitude = abs(canonized.amount)
 
@@ -164,17 +207,56 @@ defmodule TSON do
       end
 
     case canonized.unit do
-      :hour -> <<@opDuration, negateMask ||| 0x04>> <> vli(magnitude)
-      :minute -> <<@opDuration, negateMask ||| 0x02>> <> vli(magnitude)
-      :second -> <<@opDuration, negateMask ||| 0x01>> <> vli(magnitude)
-      :millisecond -> <<@opDuration, negateMask ||| 0x03>> <> vli(magnitude)
-      :microsecond -> <<@opDuration, negateMask ||| 0x06>> <> vli(magnitude)
-      :nanosecond -> <<@opDuration, negateMask ||| 0x09>> <> vli(magnitude)
+      :hour -> {<<@opDuration, negateMask ||| 0x04>> <> vli(magnitude), stringLUT}
+      :minute -> {<<@opDuration, negateMask ||| 0x02>> <> vli(magnitude), stringLUT}
+      :second -> {<<@opDuration, negateMask ||| 0x01>> <> vli(magnitude), stringLUT}
+      :millisecond -> {<<@opDuration, negateMask ||| 0x03>> <> vli(magnitude), stringLUT}
+      :microsecond -> {<<@opDuration, negateMask ||| 0x06>> <> vli(magnitude), stringLUT}
+      :nanosecond -> {<<@opDuration, negateMask ||| 0x09>> <> vli(magnitude), stringLUT}
     end
   end
 
-  def encode(float) when is_float(float) do
-    <<42>>
+  defp _encode(value, stringLUT) when is_float(value) do
+    nearestInt = round(value)
+
+    if nearestInt == value do
+      _encode(nearestInt, stringLUT)
+    else
+      bytes4 = <<value::float-32-little>>
+      <<value32::float-32-little>> = bytes4
+
+      if value32 == value do
+        {<<@opFloat4>> <> bytes4, stringLUT}
+      else
+        bytes8 = <<value::float-64-little>>
+        {<<@opFloat8>> <> bytes8, stringLUT}
+      end
+    end
+  end
+
+  defp _encode(value, stringLUT) when is_map(value) do
+    reducer = fn {k, v}, {bits1, lut1} ->
+      bits_k =
+        if is_atom(k) do
+          Atom.to_string(k) <> <<0>>
+        else
+          k <> <<0>>
+        end
+
+      {bits_v, lut2} = _encode(v, lut1)
+      {bits1 <> bits_v <> bits_k, lut2}
+    end
+
+    sortedKeys = value |> Map.keys() |> Enum.sort()
+    associations = for key <- sortedKeys, do: {key, Map.get(value, key)}
+
+    {bitsAll, lut3} = associations |> Enum.reduce({<<>>, stringLUT}, reducer)
+    mapSize = map_size(value)
+
+    cond do
+      mapSize in 1..4 -> {<<@opSmallDocument1 - 1 + mapSize>> <> bitsAll, lut3}
+      true -> {<<@opDocument>> <> bitsAll <> <<0>>, lut3}
+    end
   end
 
   defp geo_hash2(_, _, _, 0) do

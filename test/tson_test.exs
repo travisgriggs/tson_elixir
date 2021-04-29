@@ -310,10 +310,60 @@ defmodule TSONTest do
       |> Enum.map(fn x -> %TSON.String{utf8: x} end)
 
     result = TSON.encode(original)
+    expected = hexs('02 1468656C6C6F 146B69747479 0F00 14776F726C64 1368657265 0F01 0F01 0F01 00')
+    assert result == expected
+    # decoded = tson.decode(result)
+    # self.assertEqual(decoded, original)
+  end
 
-    assert result ==
-             hexs('02 1468656C6C6F 146B69747479 0F00 14776F726C64 1368657265 0F01 0F01 0F01 00')
+  test "nested repeated strings" do
+    a =
+      ["hello", "kitty", "hello", "world"]
+      |> Enum.map(fn x -> %TSON.String{utf8: x} end)
 
+    b =
+      ["here", "kitty", "kitty", "kitty"]
+      |> Enum.map(fn x -> %TSON.String{utf8: x} end)
+
+    original = [a, b]
+    result = TSON.encode(original)
+
+    expected =
+      hexs('2D 2F 1468656C6C6F 146B69747479 0F00 14776F726C64 2F 1368657265 0F01 0F01 0F01')
+
+    assert result == expected
+    # decoded = tson.decode(result)
+    # self.assertEqual(decoded, original)
+  end
+
+  test "Doc0" do
+    original = %{}
+    result = TSON.encode(original)
+    assert result == hexs('01 00')
+    # decoded = tson.decode(result)
+    # self.assertEqual(decoded, original)
+  end
+
+  test "Doc1" do
+    original = %{"1": nil}
+    result = TSON.encode(original)
+    assert result == hexs('28073100')
+    # decoded = tson.decode(result)
+    # self.assertEqual(decoded, original)
+  end
+
+  test "Doc4" do
+    original = %{"1" => nil, "2" => nil, "3" => nil, "4" => nil}
+    result = TSON.encode(original)
+    assert result == hexs('2B 073100 073200 073300 073400')
+    # decoded = tson.decode(result)
+    # self.assertEqual(decoded, original)
+  end
+
+  test "Doc5" do
+    original = %{"1" => nil, "2" => nil, "3" => nil, "4" => nil, "5" => nil}
+    result = TSON.encode(original)
+    assert result == hexs('01 073100 073200 073300 073400 073500 00')
     # decoded = tson.decode(result)
     # self.assertEqual(decoded, original)
   end
