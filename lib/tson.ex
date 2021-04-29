@@ -115,7 +115,10 @@ defmodule TSON do
   def encode(value) do
     {:ok, stringTable} = RepeatedStringEncoder.start_link()
     {:ok, keyTable} = RepeatedStringEncoder.start_link()
-    _encode(value, stringTable, keyTable)
+    result = _encode(value, stringTable, keyTable)
+    stringTable |> Agent.stop
+    keyTable |> Agent.stop
+    result
   end
 
   defp _encode(value, _, _) when is_integer(value) do
@@ -228,10 +231,22 @@ defmodule TSON do
   end
 
   defp _encode(value, stringTable, keyTable) when is_map(value) do
-    sortedKeys = value |> Map.keys() |> Enum.map(fn k -> if is_atom(k) do Atom.to_string(k) else k end end) |> Enum.sort()
+    sortedKeys =
+      value
+      |> Map.keys()
+      |> Enum.map(fn k ->
+        if is_atom(k) do
+          Atom.to_string(k)
+        else
+          k
+        end
+      end)
+      |> Enum.sort()
+
     mapper = fn k ->
       bits_v = _encode(Map.get(value, k), stringTable, keyTable)
       index = keyTable |> RepeatedStringEncoder.encoded(k)
+
       if is_integer(index) do
         <<_::size(1), rest::bitstring>> = bits_v
         <<1::size(1), rest::bitstring>> <> vli(index)
@@ -242,6 +257,7 @@ defmodule TSON do
 
     bitsAll = sortedKeys |> Enum.map_join(mapper)
     mapSize = map_size(value)
+
     cond do
       mapSize in 1..4 -> <<@opSmallDocument1 - 1 + mapSize>> <> bitsAll
       true -> <<@opDocument>> <> bitsAll <> <<0>>
