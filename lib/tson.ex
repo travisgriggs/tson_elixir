@@ -28,9 +28,9 @@ defmodule TSON do
   @opSmallString1 16
   @opSmallString24 39
   @opSmallDocument1 40
-  # @opSmallDocument4 43
+  @opSmallDocument4 43
   @opSmallArray1 44
-  # @opSmallArray4 47
+  @opSmallArray4 47
   # 48 - 55 unused
   @opDuration 55
   # 56 - 57 unused
@@ -48,6 +48,14 @@ defmodule TSON do
   # we need a struct wrapper around strings, because we have to preserve/disambiguate the difference between a raw binary and a utf8 string
   defmodule String do
     defstruct utf8: ""
+
+    def utf8(binary) when is_binary(binary) do
+      %String{utf8: binary}
+    end
+
+    def utf8(charlist) when is_list(charlist) do
+      charlist |> IO.iodata_to_binary() |> utf8
+    end
   end
 
   # basic structure for modeling a GIS coordinate
@@ -341,8 +349,16 @@ defmodule TSON do
     <<(value &&& 0x7F) ||| 0x80>> <> varuint(value >>> 7)
   end
 
-  defmodule Decoder do
-    defstruct thing: :nothing, strings: %{}, keys: %{}
+  defmodule DecodeMemory do
+    defstruct strings: %{}, keys: %{}
+  end
+
+  defp memorize_string(%DecodeMemory{strings: strings, keys: keys}, string) do
+    %DecodeMemory{strings: strings |> Map.put(map_size(strings), string), keys: keys}
+  end
+
+  defp memorize_key(%DecodeMemory{strings: strings, keys: keys}, key) do
+    %DecodeMemory{strings: strings, keys: keys |> Map.put(map_size(keys), key)}
   end
 
   def decode(binary) when is_binary(binary) do
@@ -350,43 +366,50 @@ defmodule TSON do
   end
 
   def decode([opCode | tail]) do
-    {thing, _} = decode(opCode, tail)
+    memory = %DecodeMemory{}
+    {thing, _, _} = decode(opCode, tail, memory)
     thing
   end
 
-  def decode(@opTrue, tail) do
-    {true, tail}
+  def decode(@opTrue, tail, memory) do
+    {true, tail, memory}
   end
 
-  def decode(@opFalse, tail) do
-    {false, tail}
+  def decode(@opFalse, tail, memory) do
+    {false, tail, memory}
   end
 
-  def decode(@opNone, tail) do
-    {nil, tail}
+  def decode(@opNone, tail, memory) do
+    {nil, tail, memory}
   end
 
-  def decode(@opPositiveVLI, tail) do
-    d_varuint(tail)
+  def decode(@opPositiveVLI, tail, memory) do
+    d_varuint(tail) |> Tuple.append(memory)
   end
 
-  def decode(@opNegativeVLI, tail) do
+  def decode(@opNegativeVLI, tail, memory) do
     {value, tail} = d_varuint(tail)
-    {-value, tail}
+    {-value, tail, memory}
   end
 
-  def decode(@opTerminatedString, tail) do
-    {body, [0 | tail]} = tail |> Enum.split_while(fn code -> code != 0 end)
-    {%TSON.String{utf8: body |> IO.iodata_to_binary()}, tail}
+  def decode(@opTerminatedString, tail, memory) do
+    {utf8, [0 | tail]} = tail |> Enum.split_while(fn code -> code != 0 end)
+    string = utf8 |> TSON.String.utf8()
+    {string, tail, memory |> memorize_string(string)}
   end
 
-  def decode(@opBytes, tail) do
+  def decode(@opRepeatedString, tail, memory) do
+    {index, tail} = d_varuint(tail)
+    {memory.strings[index], tail, memory}
+  end
+
+  def decode(@opBytes, tail, memory) do
     {count, tail} = d_varuint(tail)
     {body, tail} = tail |> Enum.split(count)
-    {body |> IO.iodata_to_binary(), tail}
+    {body |> IO.iodata_to_binary(), tail, memory}
   end
 
-  def decode(@opDuration, [unitOp | tail]) do
+  def decode(@opDuration, [unitOp | tail], memory) do
     multiplier =
       case unitOp &&& 0x80 do
         0x80 -> -1
@@ -404,47 +427,128 @@ defmodule TSON do
       end
 
     {magnitude, tail} = d_varuint(tail)
-    {%TSON.Duration{amount: magnitude * multiplier, unit: unit}, tail}
+    {%TSON.Duration{amount: magnitude * multiplier, unit: unit}, tail, memory}
   end
 
-  def decode(@opPositiveTimestamp, tail) do
+  def decode(@opPositiveTimestamp, tail, memory) do
     {offset, tail} = d_varuint(tail)
-    {DateTime.add(@epoch, offset, :millisecond), tail}
+    {DateTime.add(@epoch, offset, :millisecond), tail, memory}
   end
 
-  def decode(@opNegativeTimestamp, tail) do
+  def decode(@opNegativeTimestamp, tail, memory) do
     {offset, tail} = d_varuint(tail)
-    {DateTime.add(@epoch, -offset, :millisecond), tail}
+    {DateTime.add(@epoch, -offset, :millisecond), tail, memory}
   end
 
-  def decode(@opFloat4, tail) do
+  def decode(@opFloat4, tail, memory) do
     {first4, tail} = tail |> Enum.split(4)
     <<value32::float-32-little>> = first4 |> :binary.list_to_bin()
-    {value32, tail}
+    {value32, tail, memory}
   end
 
-  def decode(@opFloat8, tail) do
+  def decode(@opFloat8, tail, memory) do
     {first8, tail} = tail |> Enum.split(8)
     <<value64::float-64-little>> = first8 |> :binary.list_to_bin()
-    {value64, tail}
+    {value64, tail, memory}
   end
 
-  def decode(@opLatLon, tail) do
+  def decode(@opLatLon, tail, memory) do
     {spliced, tail} = d_varuint(tail)
     precision = 25
     latitude = geo_unhash2(spliced, -90.0, 90.0, precision)
     longitude = geo_unhash2(spliced >>> 1, -180.0, 180.0, precision)
-    {%LatLon{latitude: latitude, longitude: longitude}, tail}
+    {%LatLon{latitude: latitude, longitude: longitude}, tail, memory}
   end
 
-  def decode(smallInt, tail) when smallInt in @opSmallInt0..@opSmallInt63 do
-    {smallInt - @opSmallInt0, tail}
+  def decode(@opArray, tail, memory) do
+    decode_list_to_0(tail, memory)
   end
 
-  def decode(sizedString, tail) when sizedString in @opSmallString1..@opSmallString24 do
+  def decode(@opDocument, tail, memory) do
+    decode_map_to_0(tail, memory)
+  end
+
+  def decode(sizedArray, tail, memory) when sizedArray in @opSmallArray1..@opSmallArray4 do
+    decode_list_while_n(tail, memory, sizedArray - @opSmallArray1 + 1)
+  end
+
+  def decode(sizedDoc, tail, memory) when sizedDoc in @opSmallDocument1..@opSmallDocument4 do
+    decode_map_while_n(tail, memory, sizedDoc - @opSmallDocument1 + 1)
+  end
+
+  def decode(smallInt, tail, memory) when smallInt in @opSmallInt0..@opSmallInt63 do
+    {smallInt - @opSmallInt0, tail, memory}
+  end
+
+  def decode(sizedString, tail, memory) when sizedString in @opSmallString1..@opSmallString24 do
     count = sizedString - @opSmallString1 + 1
-    {body, tail} = tail |> Enum.split(count)
-    {%TSON.String{utf8: body |> IO.iodata_to_binary()}, tail}
+    {utf8, tail} = tail |> Enum.split(count)
+    string = utf8 |> TSON.String.utf8()
+    {string, tail, memory |> memorize_string(string)}
+  end
+
+  def decode_list_to_0([0 | tail], memory) do
+    {[], tail, memory}
+  end
+
+  def decode_list_to_0([op | tail], memory) do
+    {value, tail, memory} = decode(op, tail, memory)
+    {rest, tail, memory} = decode_list_to_0(tail, memory)
+    {[value | rest], tail, memory}
+  end
+
+  def decode_list_while_n(tail, memory, 0) do
+    {[], tail, memory}
+  end
+
+  def decode_list_while_n([op | tail], memory, count) do
+    {value, tail, memory} = decode(op, tail, memory)
+    {rest, tail, memory} = decode_list_while_n(tail, memory, count - 1)
+    {[value | rest], tail, memory}
+  end
+
+  def decode_map_to_0([0 | tail], memory) do
+    {%{}, tail, memory}
+  end
+
+  def decode_map_to_0([op | tail], memory) do
+    {value, tail, memory} = decode(op &&& 0x7F, tail, memory)
+
+    {key, tail, memory} =
+      if (op &&& 0x80) == 0x80 do
+        {index, tail} = d_varuint(tail)
+        {memory.keys[index], tail, memory}
+      else
+        {charlist, [0 | tail]} = tail |> Enum.split_while(fn code -> code != 0 end)
+        key = charlist |> IO.iodata_to_binary()
+        memory = memory |> memorize_key(key)
+        {key, tail, memory}
+      end
+
+    {rest, tail, memory} = decode_map_to_0(tail, memory)
+    {rest |> Map.put(key, value), tail, memory}
+  end
+
+  def decode_map_while_n(tail, memory, 0) do
+    {%{}, tail, memory}
+  end
+
+  def decode_map_while_n([op | tail], memory, count) do
+    {value, tail, memory} = decode(op &&& 0x7F, tail, memory)
+
+    {key, tail, memory} =
+      if (op &&& 0x80) == 0x80 do
+        {index, tail} = d_varuint(tail)
+        {memory.keys[index], tail, memory}
+      else
+        {charlist, [0 | tail]} = tail |> Enum.split_while(fn code -> code != 0 end)
+        key = charlist |> IO.iodata_to_binary()
+        memory = memory |> memorize_key(key)
+        {key, tail, memory}
+      end
+
+    {rest, tail, memory} = decode_map_while_n(tail, memory, count - 1)
+    {rest |> Map.put(key, value), tail, memory}
   end
 
   defp d_varuint([byte | tail]) when byte in 0..0x7F do

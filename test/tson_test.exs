@@ -2,11 +2,11 @@ defmodule TSONTest do
   use ExUnit.Case
   doctest TSON
 
-  def hexs(s) when is_binary(s) do
+  defp hexs(s) when is_binary(s) do
     Regex.replace(~R{[^A-Fa-f0-9]}, s, "") |> Base.decode16!(case: :mixed)
   end
 
-  def hexs(s) when is_list(s) do
+  defp hexs(s) when is_list(s) do
     to_string(s) |> hexs
   end
 
@@ -135,28 +135,32 @@ defmodule TSONTest do
     original = []
     encoding = TSON.encode(original)
     assert encoding == hexs('02 00')
-    #   assert TSON.decodeString(<<0x0E, 0x00>>) == ""
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "array1" do
     original = [%TSON.String{utf8: "t"}]
     encoding = TSON.encode(original)
     assert encoding == hexs('2C 1074')
-    #   assert TSON.decodeString(<<0x0E, 0x00>>) == ""
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "array4" do
     original = [true, false, false, true]
     encoding = TSON.encode(original)
     assert encoding == hexs('2F 05 06 06 05')
-    #   assert TSON.decodeString(<<0x0E, 0x00>>) == ""
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "array5" do
     original = [0, 2, 0, 63, 200]
     encoding = TSON.encode(original)
     assert encoding == hexs('02 40 42 40 7F 3A C8 01 00')
-    #   assert TSON.decodeString(<<0x0E, 0x00>>) == ""
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "LatLon" do
@@ -322,8 +326,8 @@ defmodule TSONTest do
     encoding = TSON.encode(original)
     expected = hexs('02 1468656C6C6F 146B69747479 0F00 14776F726C64 1368657265 0F01 0F01 0F01 00')
     assert encoding == expected
-    # decoded = tson.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "nested repeated strings" do
@@ -342,40 +346,40 @@ defmodule TSONTest do
       hexs('2D 2F 1468656C6C6F 146B69747479 0F00 14776F726C64 2F 1368657265 0F01 0F01 0F01')
 
     assert encoding == expected
-    # decoded = tson.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "Doc0" do
     original = %{}
     encoding = TSON.encode(original)
     assert encoding == hexs('01 00')
-    # decoded = tson.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "Doc1" do
-    original = %{"1": nil}
+    original = %{"1" => nil}
     encoding = TSON.encode(original)
     assert encoding == hexs('28073100')
-    # decoded = tson.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "Doc4" do
     original = %{"1" => nil, "2" => nil, "3" => nil, "4" => nil}
     encoding = TSON.encode(original)
     assert encoding == hexs('2B 073100 073200 073300 073400')
-    # decoded = tson.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "Doc5" do
     original = %{"1" => nil, "2" => nil, "3" => nil, "4" => nil, "5" => nil}
     encoding = TSON.encode(original)
     assert encoding == hexs('01 073100 073200 073300 073400 073500 00')
-    # decoded = tson.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "RepeatedField" do
@@ -387,8 +391,8 @@ defmodule TSONTest do
     encoding = TSON.encode(container)
     expected = hexs('2B   A8 693100 00   A8 10333200 01  28 830000 3300   28 8601 3400')
     assert encoding == expected
-    # let decoded = TSON.decode(data: encoded)
-    # XCTAssertEqual(decoded, tson)
+    decoded = TSON.decode(encoding)
+    assert decoded == container
   end
 
   test "family nested" do
@@ -427,9 +431,7 @@ defmodule TSONTest do
 
     encoding = TSON.encode(complicated)
     assert encoding == hexs(source)
-    # XCTAssertEqual(doc["Mark"]["dad"].string, "Larry")
-    # XCTAssertEqual(doc["Mark"]["mom"].string, "Lorraine")
-    # XCTAssertEqual(doc["Travis"]["dad"].string, "Gary")
-    # XCTAssertEqual(doc["Travis"]["mom"].string, "Suzanne")
+    decoded = TSON.decode(encoding)
+    assert decoded == complicated
   end
 end
