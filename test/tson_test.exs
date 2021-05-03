@@ -10,7 +10,7 @@ defmodule TSONTest do
     to_string(s) |> hexs
   end
 
-  test "empty" do
+  test "nothing" do
     assert TSON.encode(nil) == <<7>>
     assert TSON.decode(<<7>>) == nil
   end
@@ -29,96 +29,106 @@ defmodule TSONTest do
     original = 0
     encoding = TSON.encode(original)
     assert encoding == hexs('40')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "int27" do
     original = 27
     encoding = TSON.encode(original)
     assert encoding == hexs('5B')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "intNeg13" do
     original = -13
     encoding = TSON.encode(original)
     assert encoding == hexs('3B 0D')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "intNeg2000" do
     original = -2000
     encoding = TSON.encode(original)
     assert encoding == hexs('3B D00F')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "int63" do
     original = 63
     encoding = TSON.encode(original)
     assert encoding == hexs('7F')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "int64" do
     original = 64
     encoding = TSON.encode(original)
     assert encoding == hexs('3A 40')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "int123456" do
     original = 123_456
     encoding = TSON.encode(original)
     assert encoding == hexs('3A C0C407')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "string0" do
     original = %TSON.String{utf8: ""}
-    assert TSON.encode(original) == hexs("0E 00")
-    #   assert TSON.decodeString(<<0x0E, 0x00>>) == ""
+    encoding = TSON.encode(original)
+    assert encoding == hexs("0E 00")
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "string1" do
     original = %TSON.String{utf8: "1"}
-    assert TSON.encode(original) == hexs("10 31")
-    #   assert TSON.decodeString(<<0x0E, 0x00>>) == ""
+    encoding = TSON.encode(original)
+    assert encoding == hexs("10 31")
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "string13" do
     original = %TSON.String{utf8: "\t13th Friday\n"}
-    assert TSON.encode(original) == hexs('1C 0931337468204672696461790A')
-    #   assert TSON.decodeString(<<0x0E, 0x00>>) == ""
+    encoding = TSON.encode(original)
+    assert encoding == hexs('1C 0931337468204672696461790A')
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "string24" do
     s24 = %TSON.String{utf8: String.duplicate("Z", 24)}
-
-    assert TSON.encode(s24) == hexs('27 5A5A5A5A5A5A5A5A 5A5A5A5A5A5A5A5A 5A5A5A5A5A5A5A5A')
-
-    #   assert TSON.decodeString(<<0x0E, 0x00>>) == ""
+    encoding = TSON.encode(s24)
+    expected = hexs('27 5A5A5A5A5A5A5A5A 5A5A5A5A5A5A5A5A 5A5A5A5A5A5A5A5A')
+    assert encoding == expected
+    decoded = TSON.decode(encoding)
+    assert decoded == s24
   end
 
   test "string25" do
     s25 = %TSON.String{utf8: String.duplicate("y", 25)}
-
-    assert TSON.encode(s25) == hexs('0E 7979797979797979 7979797979797979 7979797979797979 7900')
-
-    #   assert TSON.decodeString(<<0x0E, 0x00>>) == ""
+    encoding = TSON.encode(s25)
+    expected = hexs('0E 7979797979797979 7979797979797979 7979797979797979 7900')
+    assert encoding == expected
+    decoded = TSON.decode(encoding)
+    assert decoded == s25
   end
 
   test "binaryBytes" do
     original = <<11, 22, 33, 44, 55, 66, 77>>
-    assert TSON.encode(original) == hexs('03 07 0B16212C37424D')
-    #   assert TSON.decodeString(<<0x0E, 0x00>>) == ""
+    encoding = TSON.encode(original)
+    assert encoding == hexs('03 07 0B16212C37424D')
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "array0" do
@@ -153,155 +163,155 @@ defmodule TSONTest do
     coord = %TSON.LatLon{latitude: 46.083529, longitude: -118.283026}
     encoding = TSON.encode(coord)
     assert encoding == hexs('09 A8 D4 E4 89 FA C5 58')
-    # decoded = TSON.decode(encoding)
-    # self.assertIsNotNone(decoded)
-    # self.assertIsInstance(decoded, TSON.LatLon)
-    # self.assertTrue((coord.latitude - decoded.latitude) < 0.00001)
-    # self.assertTrue((coord.longitude - decoded.longitude) < 0.00001)
+    decoded = TSON.decode(encoding)
+    assert_in_delta coord.latitude, decoded.latitude, 0.00001
+    assert_in_delta coord.longitude, decoded.longitude, 0.00001
   end
 
   test "timestamp" do
     {:ok, original, _} = DateTime.from_iso8601("2016-09-19T07:00:00Z")
     encoding = TSON.encode(original)
     assert encoding == hexs('0480DB8AB654')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "negativeTimestamp" do
     {:ok, original, _} = DateTime.from_iso8601("1970-09-19T07:00:00Z")
     encoding = TSON.encode(original)
     assert encoding == hexs('088095FEC6CB29')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "duration500" do
     duration = %TSON.Duration{amount: 500, unit: :minute}
     encoding = TSON.encode(duration)
     assert encoding == hexs('37 02 F403')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, duration)
+    decoded = TSON.decode(encoding)
+    assert decoded == duration
   end
 
   test "duration500MinNeg" do
     duration = %TSON.Duration{amount: -500, unit: :minute}
     encoding = TSON.encode(duration)
     assert encoding == hexs('37 82 F403')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, duration)
+    decoded = TSON.decode(encoding)
+    assert decoded == duration
   end
 
   test "duration30Seconds" do
     duration = %TSON.Duration{amount: 30, unit: :second}
     encoding = TSON.encode(duration)
     assert encoding == hexs('37 01 1E')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, duration)
+    decoded = TSON.decode(encoding)
+    assert decoded == duration
   end
 
   test "duration60SecondsNeg" do
     duration = %TSON.Duration{amount: -60, unit: :second}
     encoding = TSON.encode(duration)
     assert encoding == hexs('37 82 01')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, duration)
+    decoded = TSON.decode(encoding)
+    assert decoded == %TSON.Duration{amount: -1, unit: :minute}
   end
 
   test "duration61SecondsNeg" do
     duration = %TSON.Duration{amount: -61, unit: :second}
     encoding = TSON.encode(duration)
     assert encoding == hexs('37 81 3D')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, duration)
+    decoded = TSON.decode(encoding)
+    assert decoded == duration
   end
 
   test "duration8000Milliseconds" do
     duration = %TSON.Duration{amount: 8000, unit: :millisecond}
     encoding = TSON.encode(duration)
     assert encoding == hexs('37 01 08')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, duration)
+    decoded = TSON.decode(encoding)
+    assert decoded == %TSON.Duration{amount: 8, unit: :second}
   end
 
   test "duration8001Milliseconds" do
     duration = %TSON.Duration{amount: 8001, unit: :millisecond}
     encoding = TSON.encode(duration)
     assert encoding == hexs('37 03 C13E')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, duration)
+    decoded = TSON.decode(encoding)
+    assert decoded == duration
   end
 
   test "duration7777MillisecondsNeg" do
     duration = %TSON.Duration{amount: -7777, unit: :millisecond}
     encoding = TSON.encode(duration)
     assert encoding == hexs('37 83 E13C')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, duration)
+    decoded = TSON.decode(encoding)
+    assert decoded == duration
   end
 
   test "duration15Microseconds" do
     duration = %TSON.Duration{amount: 15, unit: :microsecond}
     encoding = TSON.encode(duration)
     assert encoding == hexs('37 06 0F')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, duration)
+    decoded = TSON.decode(encoding)
+    assert decoded == duration
   end
 
   test "duration1MicrosecondsNeg" do
     duration = %TSON.Duration{amount: -1, unit: :microsecond}
     encoding = TSON.encode(duration)
     assert encoding == hexs('37 86 01')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, duration)
+    decoded = TSON.decode(encoding)
+    assert decoded == duration
   end
 
   test "duration24Hours" do
     duration = %TSON.Duration{amount: 24, unit: :hour}
     encoding = TSON.encode(duration)
     assert encoding == hexs('37 04 18')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, duration)
+    decoded = TSON.decode(encoding)
+    assert decoded == duration
   end
 
   test "duration180HoursNeg" do
     duration = %TSON.Duration{amount: -180, unit: :hour}
     encoding = TSON.encode(duration)
     assert encoding == hexs('37 84 B401')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, duration)
+    decoded = TSON.decode(encoding)
+    assert decoded == duration
   end
 
   test "float200_0" do
     original = 200.0
     encoding = TSON.encode(original)
     assert encoding == hexs('3AC801')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert is_integer(decoded)
+    assert decoded == 200
   end
 
   test "floatNeg6789_0" do
     original = -6789.0
     encoding = TSON.encode(original)
     assert encoding == hexs('3B8535')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert is_integer(decoded)
+    assert decoded == -6789
   end
 
   test "float0_25" do
     original = 0.25
     encoding = TSON.encode(original)
     assert encoding == hexs('3C0000803E')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "float0_3333" do
     original = 0.3333
     encoding = TSON.encode(original)
     assert encoding == hexs('3D696FF085C954D53F')
-    # decoded = TSON.decode(encoding)
-    # self.assertEqual(decoded, original)
+    decoded = TSON.decode(encoding)
+    assert decoded == original
   end
 
   test "repeatedStrings" do
