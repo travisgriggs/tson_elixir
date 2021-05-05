@@ -1,26 +1,22 @@
 defmodule TSON.Encoder do
   use Bitwise, only_operators: true
   alias __MODULE__
-  alias TSON.Opcodes, as: Op
+  alias TSON.Op
   require Op
 
   defstruct iodata: [], strings: %{}, keys: %{}
 
   def encode(value) do
-    encoder = %Encoder{}
-    encoder = encoder |> encode(value)
+    encoder = %Encoder{} |> encode(value)
     encoder.iodata |> IO.iodata_to_binary()
   end
 
   defp encode(encoder, value) when is_integer(value) do
-    encoder
-    |> add(
-      cond do
-        value in 0..63 -> Op.small_int_0() + value
-        value < 0 -> [Op.negative_varuint(), -value |> varuint]
-        true -> [Op.positive_varuint(), value |> varuint]
-      end
-    )
+    cond do
+      value in 0..63 -> encoder |> add(Op.small_int_0() + value)
+      value < 0 -> encoder |> add([Op.negative_varuint(), -value |> varuint])
+      true -> encoder |> add([Op.positive_varuint(), value |> varuint])
+    end
   end
 
   defp encode(encoder, true) do

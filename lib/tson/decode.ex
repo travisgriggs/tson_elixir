@@ -1,6 +1,6 @@
 defmodule TSON.Decode do
   use Bitwise, only_operators: true
-  alias TSON.Opcodes, as: Op
+  alias TSON.Op
   require Op
 
   @small_string_range Op.small_string_1()..Op.small_string_24()
@@ -23,9 +23,8 @@ defmodule TSON.Decode do
     binary |> :binary.bin_to_list() |> decode
   end
 
-  def decode([opCode | tail]) do
-    memory = %Memory{}
-    {thing, _, _} = decode(opCode, tail, memory)
+  def decode([op_code | tail]) do
+    {thing, _, _} = decode(op_code, tail, %Memory{})
     thing
   end
 

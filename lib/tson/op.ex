@@ -1,4 +1,7 @@
-defmodule TSON.Opcodes do
+defmodule TSON.Op do
+  @moduledoc """
+  Opcodes
+  """
   defmacro document, do: 1
   defmacro array, do: 2
   defmacro bytes, do: 3
