@@ -3,6 +3,10 @@ defmodule TSON.Decode do
   alias TSON.Opcodes, as: Op
   require Op
 
+  @small_string_range Op.small_string_1()..Op.small_string_24()
+  @small_array_range Op.small_array_1()..Op.small_array_4()
+  @small_document_range Op.small_document_1()..Op.small_document_4()
+
   defmodule Memory do
     defstruct strings: %{}, keys: %{}
 
@@ -120,13 +124,11 @@ defmodule TSON.Decode do
     decode_map_to_0(tail, memory)
   end
 
-  defp decode(small_array, tail, memory)
-       when small_array in Op.small_array_1()..Op.small_array_4() do
+  defp decode(small_array, tail, memory) when small_array in @small_array_range do
     decode_list_while_n(tail, memory, small_array - Op.small_array_1() + 1)
   end
 
-  defp decode(small_doc, tail, memory)
-       when small_doc in Op.small_document_1()..Op.small_document_4() do
+  defp decode(small_doc, tail, memory) when small_doc in @small_document_range do
     decode_map_while_n(tail, memory, small_doc - Op.small_document_1() + 1)
   end
 
@@ -134,8 +136,7 @@ defmodule TSON.Decode do
     {small_int - Op.small_int_0(), tail, memory}
   end
 
-  defp decode(small_string, tail, memory)
-       when small_string in Op.small_string_1()..Op.small_string_24() do
+  defp decode(small_string, tail, memory) when small_string in @small_string_range do
     count = small_string - Op.small_string_1() + 1
     {utf8, tail} = tail |> Enum.split(count)
     string = utf8 |> TSON.String.utf8()

@@ -23,5 +23,5 @@ defmodule TSON.Duration do
     reduced(%Duration{amount: div(amount, 1000), unit: :microsecond})
   end
 
-  def reduced(%Duration{} = d), do: d
+  def reduced(%Duration{} = duration), do: duration
 end
