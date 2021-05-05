@@ -3,24 +3,24 @@ defmodule TSON.Duration do
 
   defstruct amount: 0, unit: :second
 
-  def reduced(%Duration{amount: amount, unit: :minute}) when rem(amount, 60) == 0 do
-    %Duration{amount: div(amount, 60), unit: :hour}
+  def reduced(%Duration{amount: amount, unit: :minute}) when amount |> rem(60) == 0 do
+    %Duration{amount: amount |> div(60), unit: :hour}
   end
 
-  def reduced(%Duration{amount: amount, unit: :second}) when rem(amount, 60) == 0 do
-    reduced(%Duration{amount: div(amount, 60), unit: :minute})
+  def reduced(%Duration{amount: amount, unit: :second}) when amount |> rem(60) == 0 do
+    reduced(%Duration{amount: amount |> div(60), unit: :minute})
   end
 
-  def reduced(%Duration{amount: amount, unit: :millisecond}) when rem(amount, 1000) == 0 do
-    reduced(%Duration{amount: div(amount, 1000), unit: :second})
+  def reduced(%Duration{amount: amount, unit: :millisecond}) when amount |> rem(1000) == 0 do
+    reduced(%Duration{amount: amount |> div(1000), unit: :second})
   end
 
-  def reduced(%Duration{amount: amount, unit: :microsecond}) when rem(amount, 1000) == 0 do
-    reduced(%Duration{amount: div(amount, 1000), unit: :millisecond})
+  def reduced(%Duration{amount: amount, unit: :microsecond}) when amount |> rem(1000) == 0 do
+    reduced(%Duration{amount: amount |> div(1000), unit: :millisecond})
   end
 
-  def reduced(%Duration{amount: amount, unit: :nanosecond}) when rem(amount, 1000) == 0 do
-    reduced(%Duration{amount: div(amount, 1000), unit: :microsecond})
+  def reduced(%Duration{amount: amount, unit: :nanosecond}) when amount |> rem(1000) == 0 do
+    reduced(%Duration{amount: amount |> div(1000), unit: :microsecond})
   end
 
   def reduced(%Duration{} = duration), do: duration

@@ -66,15 +66,15 @@ defmodule TSON.Decode do
     {body |> IO.iodata_to_binary(), tail, memory}
   end
 
-  defp decode(Op.duration(), [unitOp | tail], memory) do
+  defp decode(Op.duration(), [unit_op | tail], memory) do
     multiplier =
-      case unitOp &&& 0x80 do
+      case unit_op &&& 0x80 do
         0x80 -> -1
         0 -> 1
       end
 
     unit =
-      case unitOp &&& 0x7F do
+      case unit_op &&& 0x7F do
         0x04 -> :hour
         0x02 -> :minute
         0x01 -> :second

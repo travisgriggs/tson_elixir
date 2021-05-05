@@ -42,10 +42,10 @@ defmodule TSON.Encoder do
         subcoder |> encode(element)
       end)
 
-    listLength = length(value)
+    list_length = length(value)
 
-    if listLength in 1..4 do
-      encoder |> add(Op.small_array_1() - 1 + listLength) |> add_subcoder(subcoder)
+    if list_length in 1..4 do
+      encoder |> add(Op.small_array_1() - 1 + list_length) |> add_subcoder(subcoder)
     else
       encoder |> add(Op.array()) |> add_subcoder(subcoder) |> add(0)
     end
@@ -57,10 +57,10 @@ defmodule TSON.Encoder do
     if is_integer(index) do
       encoder |> add([Op.repeated_string(), varuint(index)])
     else
-      byte_size = byte_size(utf8)
+      byte_size_ = byte_size(utf8)
 
-      if byte_size in 1..24 do
-        encoder |> add([Op.small_string_1() - 1 + byte_size, utf8])
+      if byte_size_ in 1..24 do
+        encoder |> add([Op.small_string_1() - 1 + byte_size_, utf8])
       else
         encoder |> add([Op.terminated_string(), utf8, 0])
       end
@@ -87,28 +87,27 @@ defmodule TSON.Encoder do
   end
 
   defp encode(encoder, %TSON.Duration{} = duration) do
-    canonized = TSON.Duration.reduced(duration)
-    magnitude = abs(canonized.amount)
+    reduced = duration |> TSON.Duration.reduced()
+    positive_amount = reduced.amount |> abs
 
-    negateMask =
-      if magnitude == canonized.amount do
+    negate_mask =
+      if positive_amount == reduced.amount do
         0x00
       else
         0x80
       end
 
-    opUnit =
-      negateMask |||
-        case canonized.unit do
-          :hour -> 0x04
-          :minute -> 0x02
-          :second -> 0x01
-          :millisecond -> 0x03
-          :microsecond -> 0x06
-          :nanosecond -> 0x09
-        end
+    unit_op =
+      case reduced.unit do
+        :hour -> 0x04
+        :minute -> 0x02
+        :second -> 0x01
+        :millisecond -> 0x03
+        :microsecond -> 0x06
+        :nanosecond -> 0x09
+      end
 
-    encoder |> add([Op.duration(), opUnit, magnitude |> varuint])
+    encoder |> add([Op.duration(), negate_mask ||| unit_op, positive_amount |> varuint])
   end
 
   defp encode(encoder, value) when is_float(value) do
